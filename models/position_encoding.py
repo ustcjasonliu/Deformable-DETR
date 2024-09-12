@@ -14,7 +14,7 @@ import math
 import torch
 from torch import nn
 
-from util.misc import NestedTensor
+from submodules.deformable_detr.util.misc import NestedTensor
 
 
 class PositionEmbeddingSine(nn.Module):
@@ -60,18 +60,17 @@ class PositionEmbeddingLearned(nn.Module):
     """
     Absolute pos embedding, learned.
     """
-    def __init__(self, num_pos_feats=256):
+    def __init__(self, h, w, num_pos_feats=256):
         super().__init__()
-        self.row_embed = nn.Embedding(50, num_pos_feats)
-        self.col_embed = nn.Embedding(50, num_pos_feats)
+        self.row_embed = nn.Embedding(h, num_pos_feats).cuda()
+        self.col_embed = nn.Embedding(w, num_pos_feats).cuda()
         self.reset_parameters()
 
     def reset_parameters(self):
         nn.init.uniform_(self.row_embed.weight)
         nn.init.uniform_(self.col_embed.weight)
 
-    def forward(self, tensor_list: NestedTensor):
-        x = tensor_list.tensors
+    def forward(self, x):
         h, w = x.shape[-2:]
         i = torch.arange(w, device=x.device)
         j = torch.arange(h, device=x.device)

@@ -16,13 +16,13 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.nn.init import xavier_uniform_, constant_, uniform_, normal_
 
-from util.misc import inverse_sigmoid
-from models.ops.modules import MSDeformAttn
+from submodules.deformable_detr.util.misc import inverse_sigmoid
+from submodules.deformable_detr.models.ops.modules import MSDeformAttn
 
 
 class DeformableTransformer(nn.Module):
     def __init__(self, d_model=256, nhead=8,
-                 num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1,
+                 num_encoder_layers=5, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1,
                  activation="relu", return_intermediate_dec=False,
                  num_feature_levels=4, dec_n_points=4,  enc_n_points=4,
                  two_stage=False, two_stage_num_proposals=300):
@@ -124,15 +124,17 @@ class DeformableTransformer(nn.Module):
         return valid_ratio
 
     def forward(self, srcs, masks, pos_embeds, query_embed=None):
-        assert self.two_stage or query_embed is not None
+        # assert self.two_stage or query_embed is not None
 
         # prepare input for encoder
+        print("=================test0=============")
         src_flatten = []
         mask_flatten = []
         lvl_pos_embed_flatten = []
         spatial_shapes = []
         for lvl, (src, mask, pos_embed) in enumerate(zip(srcs, masks, pos_embeds)):
             bs, c, h, w = src.shape
+            print("bs ", bs, " c ", c , " h ", h , " w ", w)
             spatial_shape = (h, w)
             spatial_shapes.append(spatial_shape)
             src = src.flatten(2).transpose(1, 2)
@@ -142,48 +144,53 @@ class DeformableTransformer(nn.Module):
             lvl_pos_embed_flatten.append(lvl_pos_embed)
             src_flatten.append(src)
             mask_flatten.append(mask)
+        print("=================test1=============")
         src_flatten = torch.cat(src_flatten, 1)
         mask_flatten = torch.cat(mask_flatten, 1)
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
+        print("=================test2=============")
         spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device)
         level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
-
+        print("=================test3=============")
         # encoder
         memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
+        print("=================test4=============")
+        print("memory shape", memory.shape)
+        return memory.permute(0, 2, 1).reshape(-1, srcs[0].shape[1], srcs[0].shape[2], srcs[0].shape[3])
 
-        # prepare input for decoder
-        bs, _, c = memory.shape
-        if self.two_stage:
-            output_memory, output_proposals = self.gen_encoder_output_proposals(memory, mask_flatten, spatial_shapes)
+        # # prepare input for decoder
+        # bs, _, c = memory.shape
+        # if self.two_stage:
+        #     output_memory, output_proposals = self.gen_encoder_output_proposals(memory, mask_flatten, spatial_shapes)
 
-            # hack implementation for two-stage Deformable DETR
-            enc_outputs_class = self.decoder.class_embed[self.decoder.num_layers](output_memory)
-            enc_outputs_coord_unact = self.decoder.bbox_embed[self.decoder.num_layers](output_memory) + output_proposals
+        #     # hack implementation for two-stage Deformable DETR
+        #     enc_outputs_class = self.decoder.class_embed[self.decoder.num_layers](output_memory)
+        #     enc_outputs_coord_unact = self.decoder.bbox_embed[self.decoder.num_layers](output_memory) + output_proposals
 
-            topk = self.two_stage_num_proposals
-            topk_proposals = torch.topk(enc_outputs_class[..., 0], topk, dim=1)[1]
-            topk_coords_unact = torch.gather(enc_outputs_coord_unact, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, 4))
-            topk_coords_unact = topk_coords_unact.detach()
-            reference_points = topk_coords_unact.sigmoid()
-            init_reference_out = reference_points
-            pos_trans_out = self.pos_trans_norm(self.pos_trans(self.get_proposal_pos_embed(topk_coords_unact)))
-            query_embed, tgt = torch.split(pos_trans_out, c, dim=2)
-        else:
-            query_embed, tgt = torch.split(query_embed, c, dim=1)
-            query_embed = query_embed.unsqueeze(0).expand(bs, -1, -1)
-            tgt = tgt.unsqueeze(0).expand(bs, -1, -1)
-            reference_points = self.reference_points(query_embed).sigmoid()
-            init_reference_out = reference_points
+        #     topk = self.two_stage_num_proposals
+        #     topk_proposals = torch.topk(enc_outputs_class[..., 0], topk, dim=1)[1]
+        #     topk_coords_unact = torch.gather(enc_outputs_coord_unact, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, 4))
+        #     topk_coords_unact = topk_coords_unact.detach()
+        #     reference_points = topk_coords_unact.sigmoid()
+        #     init_reference_out = reference_points
+        #     pos_trans_out = self.pos_trans_norm(self.pos_trans(self.get_proposal_pos_embed(topk_coords_unact)))
+        #     query_embed, tgt = torch.split(pos_trans_out, c, dim=2)
+        # else:
+        #     query_embed, tgt = torch.split(query_embed, c, dim=1)
+        #     query_embed = query_embed.unsqueeze(0).expand(bs, -1, -1)
+        #     tgt = tgt.unsqueeze(0).expand(bs, -1, -1)
+        #     reference_points = self.reference_points(query_embed).sigmoid()
+        #     init_reference_out = reference_points
 
-        # decoder
-        hs, inter_references = self.decoder(tgt, reference_points, memory,
-                                            spatial_shapes, level_start_index, valid_ratios, query_embed, mask_flatten)
+        # # decoder
+        # hs, inter_references = self.decoder(tgt, reference_points, memory,
+        #                                     spatial_shapes, level_start_index, valid_ratios, query_embed, mask_flatten)
 
-        inter_references_out = inter_references
-        if self.two_stage:
-            return hs, init_reference_out, inter_references_out, enc_outputs_class, enc_outputs_coord_unact
-        return hs, init_reference_out, inter_references_out, None, None
+        # inter_references_out = inter_references
+        # if self.two_stage:
+        #     return hs, init_reference_out, inter_references_out, enc_outputs_class, enc_outputs_coord_unact
+        # return hs, init_reference_out, inter_references_out, None, None
 
 
 class DeformableTransformerEncoderLayer(nn.Module):

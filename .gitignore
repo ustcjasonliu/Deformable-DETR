@@ -1,0 +1,8 @@
+**__pycache_**
+work_dirs/
+*.so
+*egg-info*
+*nfs*
+data/
+*/build/
+*.o

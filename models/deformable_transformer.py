@@ -127,14 +127,12 @@ class DeformableTransformer(nn.Module):
         # assert self.two_stage or query_embed is not None
 
         # prepare input for encoder
-        print("=================test0=============")
         src_flatten = []
         mask_flatten = []
         lvl_pos_embed_flatten = []
         spatial_shapes = []
         for lvl, (src, mask, pos_embed) in enumerate(zip(srcs, masks, pos_embeds)):
             bs, c, h, w = src.shape
-            print("bs ", bs, " c ", c , " h ", h , " w ", w)
             spatial_shape = (h, w)
             spatial_shapes.append(spatial_shape)
             src = src.flatten(2).transpose(1, 2)
@@ -144,19 +142,14 @@ class DeformableTransformer(nn.Module):
             lvl_pos_embed_flatten.append(lvl_pos_embed)
             src_flatten.append(src)
             mask_flatten.append(mask)
-        print("=================test1=============")
         src_flatten = torch.cat(src_flatten, 1)
         mask_flatten = torch.cat(mask_flatten, 1)
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
-        print("=================test2=============")
         spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device)
         level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
-        print("=================test3=============")
         # encoder
         memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
-        print("=================test4=============")
-        print("memory shape", memory.shape)
         return memory.permute(0, 2, 1).reshape(-1, srcs[0].shape[1], srcs[0].shape[2], srcs[0].shape[3])
 
         # # prepare input for decoder
